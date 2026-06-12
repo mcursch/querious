@@ -197,7 +197,7 @@ def seed(db_path: str = "data/acme.db") -> None:
                     seen_user_emails.add(email)
                     break
             role      = random.choice(DEPT_ROLES[dept])
-            hire_date = fake.date_between(start_date="-6y", end_date=now.date())
+            hire_date = fake.date_between(start_date=(now - timedelta(days=6*365)).date(), end_date=now.date())
             is_active = 1 if random.random() > 0.10 else 0
             user_rows.append((
                 fake.name(),
@@ -374,16 +374,20 @@ def seed(db_path: str = "data/acme.db") -> None:
         a_cents    = inv_amount_cents[iid]
         issue_date = inv_issue_date[iid]
         if random.random() < 0.20 and a_cents > 1:
-            # Split into two parts that sum exactly to a_cents.
+            # Split into two parts that sum exactly to _dollars(a_cents).
+            # p2_amount is the arithmetic complement of p1_amount at the float
+            # level so that p1_amount + p2_amount == _dollars(a_cents) exactly.
             frac = random.uniform(0.30, 0.70)
-            p1_cents = max(1, round(a_cents * frac))
-            p2_cents = a_cents - p1_cents          # exact by construction
-            for p_cents in (p1_cents, p2_cents):
+            p1_cents  = max(1, round(a_cents * frac))
+            a_amount  = _dollars(a_cents)
+            p1_amount = _dollars(p1_cents)
+            p2_amount = a_amount - p1_amount  # no extra round(); guarantees exact sum
+            for amount in (p1_amount, p2_amount):
                 pay_date = (issue_date + timedelta(days=random.randint(1, 30))).isoformat()
                 payment_rows.append((
                     iid,
                     pay_date,
-                    _dollars(p_cents),
+                    amount,
                     random.choice(PAYMENT_METHODS),
                 ))
         else:
