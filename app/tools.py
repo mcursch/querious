@@ -143,12 +143,17 @@ def _run_sql(query: str) -> dict:
         return {"is_error": True, "error": "query is required"}
     try:
         rows = db.execute_query(query)
-        return {"rows": rows, "count": len(rows)}
+        return {"rows": rows, "row_count": len(rows)}
     except ValueError as exc:
         # Validation error — return as is_error so Claude can self-correct
         return {"is_error": True, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001
         return {"is_error": True, "error": str(exc)}
+
+
+def run_sql(query: str) -> dict:
+    """Public wrapper around :func:`_run_sql` for direct use in tests and scripts."""
+    return _run_sql(query)
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +173,7 @@ def summarise_result(tool_name: str, result: Any) -> str:
         return "schema retrieved"
 
     if tool_name == "run_sql":
-        count = result.get("count", 0) if isinstance(result, dict) else 0
+        count = result.get("row_count", 0) if isinstance(result, dict) else 0
         return f"{count} row{'s' if count != 1 else ''} returned"
 
     return "done"
