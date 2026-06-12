@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Querious — Acme Outfitters AI Assistant</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      color: #1a1a2e;
+    }
+
+    header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header span { opacity: 0.7; font-size: 0.85rem; }
+
+    #chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .bubble {
+      max-width: 78%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      line-height: 1.55;
+      font-size: 0.95rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bubble.user {
+      align-self: flex-end;
+      background: #1a1a2e;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .bubble.assistant {
+      align-self: flex-start;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-bottom-left-radius: 4px;
+    }
+
+    /* Tool call chips */
+    .tool-chip {
+      align-self: flex-start;
+      background: #f8f4ff;
+      border: 1px solid #d0b8ff;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      max-width: 78%;
+      cursor: pointer;
+    }
+    .tool-chip summary {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #5a2d82;
+      font-weight: 500;
+      user-select: none;
+    }
+    .tool-chip summary::marker { display: none; }
+    .tool-chip summary .icon { font-size: 1.1em; }
+    .tool-chip summary .status { margin-left: auto; opacity: 0.7; font-size: 0.8em; }
+    .tool-chip .detail {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #d0b8ff;
+      color: #333;
+    }
+    .tool-chip pre {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      border-radius: 6px;
+      padding: 8px 10px;
+      overflow-x: auto;
+      font-size: 0.82rem;
+      margin-top: 6px;
+      white-space: pre-wrap;
+    }
+
+    .spinner { animation: spin 1s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #input-area {
+      border-top: 1px solid #ddd;
+      background: #fff;
+      padding: 14px 20px;
+      display: flex;
+      gap: 10px;
+    }
+    #message-input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #ccc;
+      border-radius: 20px;
+      font-size: 0.95rem;
+      resize: none;
+      height: 44px;
+      max-height: 140px;
+      overflow-y: auto;
+      outline: none;
+      font-family: inherit;
+    }
+    #message-input:focus { border-color: #5a2d82; }
+    #message-input:disabled { background: #f5f5f5; }
+
+    #send-btn {
+      padding: 10px 18px;
+      background: #1a1a2e;
+      color: #fff;
+      border: none;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: opacity 0.15s;
+    }
+    #send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* Markdown-ish formatting inside bubbles */
+    .bubble code {
+      background: #f0f0f0;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: 0.88em;
+    }
+    .bubble pre {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      margin: 6px 0;
+      white-space: pre-wrap;
+    }
+    .bubble table {
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      margin: 6px 0;
+      width: 100%;
+    }
+    .bubble th, .bubble td {
+      border: 1px solid #ddd;
+      padding: 4px 8px;
+      text-align: left;
+    }
+    .bubble th { background: #f5f5f5; }
+
+    #empty-state {
+      margin: auto;
+      text-align: center;
+      color: #888;
+      font-size: 0.95rem;
+    }
+    #empty-state h2 { font-size: 1.4rem; margin-bottom: 6px; color: #555; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>&#129302; Querious</h1>
+  <span>Acme Outfitters internal AI assistant</span>
+</header>
+
+<div id="chat-container">
+  <div id="empty-state">
+    <h2>How can I help?</h2>
+    <p>Ask about policies, products, customers, orders, invoices &amp; more.</p>
+  </div>
+</div>
+
+<div id="input-area">
+  <textarea id="message-input" placeholder="Ask anything about Acme Outfitters…" rows="1"></textarea>
+  <button id="send-btn">Send</button>
+</div>
+
+<script>
+  // ---------------------------------------------------------------------------
+  // Session
+  // ---------------------------------------------------------------------------
+  const SESSION_ID = 'session-' + Math.random().toString(36).slice(2, 10);
+
+  // ---------------------------------------------------------------------------
+  // DOM refs
+  // ---------------------------------------------------------------------------
+  const chatContainer = document.getElementById('chat-container');
+  const messageInput  = document.getElementById('message-input');
+  const sendBtn       = document.getElementById('send-btn');
+  const emptyState    = document.getElementById('empty-state');
+
+  // ---------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------
+  let isStreaming = false;
+  let currentAssistantBubble = null; // the live bubble accumulating text
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  function setStreaming(val) {
+    isStreaming = val;
+    messageInput.disabled = val;
+    sendBtn.disabled = val;
+    if (!val) messageInput.focus();
+  }
+
+  function scrollBottom() {
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+  }
+
+  function removeEmpty() {
+    if (emptyState && emptyState.parentNode) emptyState.remove();
+  }
+
+  /**
+   * Very light Markdown → HTML converter (code blocks, inline code, bold,
+   * tables). Enough for the chatbot's typical output; no external lib needed.
+   */
+  function markdownToHtml(text) {
+    // Fenced code blocks
+    text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+      `<pre><code>${escHtml(code.trimEnd())}</code></pre>`);
+    // Inline code
+    text = text.replace(/`([^`]+)`/g, (_, c) => `<code>${escHtml(c)}</code>`);
+    // Bold
+    text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Simple Markdown table (| col | col |)
+    text = text.replace(/(\|.+\|\n)+/g, tableBlock => {
+      const rows = tableBlock.trim().split('\n');
+      if (rows.length < 2) return tableBlock;
+      const toRow = (r, tag) =>
+        '<tr>' + r.split('|').slice(1, -1)
+          .map(c => `<${tag}>${c.trim()}</${tag}>`).join('') + '</tr>';
+      const header = toRow(rows[0], 'th');
+      // rows[1] is the separator line (--- | ---); skip it
+      const body = rows.slice(2).map(r => toRow(r, 'td')).join('');
+      return `<table><thead>${header}</thead><tbody>${body}</tbody></table>`;
+    });
+    // Newlines → <br> (only outside tags)
+    text = text.replace(/\n/g, '<br>');
+    return text;
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bubble builders
+  // ---------------------------------------------------------------------------
+
+  function addUserBubble(text) {
+    const div = document.createElement('div');
+    div.className = 'bubble user';
+    div.textContent = text;
+    chatContainer.appendChild(div);
+    scrollBottom();
+  }
+
+  function getOrCreateAssistantBubble() {
+    if (!currentAssistantBubble) {
+      currentAssistantBubble = document.createElement('div');
+      currentAssistantBubble.className = 'bubble assistant';
+      currentAssistantBubble.dataset.raw = '';
+      chatContainer.appendChild(currentAssistantBubble);
+    }
+    return currentAssistantBubble;
+  }
+
+  function appendText(text) {
+    const bubble = getOrCreateAssistantBubble();
+    bubble.dataset.raw += text;
+    bubble.innerHTML = markdownToHtml(bubble.dataset.raw);
+    scrollBottom();
+  }
+
+  /** Insert a tool chip between the last text bubble and future text. */
+  function addToolChip(name, input) {
+    // Seal current bubble so new text goes to a fresh one
+    currentAssistantBubble = null;
+
+    const icon = name === 'search_docs' ? '&#128269;'
+               : name === 'run_sql'     ? '&#128451;'
+               : '&#128196;'; // get_schema
+
+    const label = name === 'search_docs' ? 'Searching docs…'
+                : name === 'run_sql'     ? 'Running SQL…'
+                : 'Getting schema…';
+
+    const chip = document.createElement('details');
+    chip.className = 'tool-chip';
+    chip.dataset.toolName = name;
+    chip.innerHTML = `
+      <summary>
+        <span class="icon">${icon}</span>
+        <span class="label">${label}</span>
+        <span class="status spinner">&#9696;</span>
+      </summary>
+      <div class="detail">${buildToolDetail(name, input)}</div>
+    `;
+    chatContainer.appendChild(chip);
+    scrollBottom();
+    return chip;
+  }
+
+  function buildToolDetail(name, input) {
+    if (name === 'run_sql' && input.query) {
+      return `<strong>SQL</strong><pre>${escHtml(input.query)}</pre>`;
+    }
+    if (name === 'search_docs' && input.query) {
+      return `<strong>Query:</strong> ${escHtml(input.query)}`;
+    }
+    return '';
+  }
+
+  function finaliseToolChip(name, summary) {
+    // Find the most recent chip for this tool
+    const chips = [...chatContainer.querySelectorAll('.tool-chip')];
+    const chip = chips.reverse().find(c => c.dataset.toolName === name);
+    if (!chip) return;
+    const statusEl = chip.querySelector('.status');
+    if (statusEl) {
+      statusEl.classList.remove('spinner');
+      statusEl.textContent = summary;
+    }
+    const labelEl = chip.querySelector('.label');
+    if (labelEl) {
+      labelEl.textContent =
+        name === 'search_docs' ? 'Searched docs'
+        : name === 'run_sql'   ? 'Ran SQL'
+        : 'Got schema';
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Send message
+  // ---------------------------------------------------------------------------
+
+  async function sendMessage() {
+    const text = messageInput.value.trim();
+    if (!text || isStreaming) return;
+
+    removeEmpty();
+    setStreaming(true);
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+
+    addUserBubble(text);
+
+    try {
+      const resp = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: SESSION_ID, message: text }),
+      });
+
+      if (!resp.ok) {
+        appendText(`\n[Error: server returned ${resp.status}]`);
+        setStreaming(false);
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete last line
+
+        let eventType = null;
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            const raw = line.slice(5).trim();
+            handleSseEvent(eventType, raw);
+            eventType = null;
+          }
+        }
+      }
+    } catch (err) {
+      appendText(`\n[Network error: ${err.message}]`);
+    } finally {
+      currentAssistantBubble = null;
+      setStreaming(false);
+    }
+  }
+
+  function handleSseEvent(type, rawData) {
+    let data;
+    try { data = JSON.parse(rawData); } catch { data = {}; }
+
+    if (type === 'text') {
+      appendText(data.text || '');
+    } else if (type === 'tool_start') {
+      addToolChip(data.name, data.input || {});
+    } else if (type === 'tool_end') {
+      finaliseToolChip(data.name, data.summary || 'done');
+      // Next text goes into a fresh bubble after the chip
+      currentAssistantBubble = null;
+    } else if (type === 'done') {
+      if (data.error) {
+        appendText(`\n[Error: ${data.error}]`);
+      }
+      currentAssistantBubble = null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Event listeners
+  // ---------------------------------------------------------------------------
+
+  sendBtn.addEventListener('click', sendMessage);
+
+  messageInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // Auto-resize textarea
+  messageInput.addEventListener('input', () => {
+    messageInput.style.height = 'auto';
+    messageInput.style.height = Math.min(messageInput.scrollHeight, 140) + 'px';
+  });
+</script>
+</body>
+</html>
