@@ -42,6 +42,7 @@ use.  Modules can be imported safely even when acme.db does not exist.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -60,6 +61,7 @@ logger = logging.getLogger(__name__)
 
 MODEL = "claude-opus-4-8"
 MAX_TOKENS = 16_000
+MAX_TOOL_ROUNDS = 10
 
 # Beta flag required for interleaved (thinking + tool_use) streaming
 _THINKING_BETAS = ["interleaved-thinking-2025-05-14"]
@@ -264,13 +266,18 @@ async def chat(
     user_message:
         The new user turn (plain text string).
     """
-    # Retrieve (or create) the session history and append the user turn.
+    # Retrieve (or create) the session history.
+    # Snapshot the current length so we can roll back if the API call fails
+    # before an assistant turn is ever appended (which would leave a dangling
+    # user-only entry that the API would reject on the next call).
     history = _sessions.setdefault(session_id, [])
+    snapshot = len(history)
     history.append({"role": "user", "content": user_message})
 
     client = _get_client()
 
     try:
+        tool_round = 0
         while True:
             # ------------------------------------------------------------------
             # Stream the next Claude response
@@ -311,6 +318,22 @@ async def chat(
                 break
 
             # ------------------------------------------------------------------
+            # Guard against infinite agentic loops
+            # ------------------------------------------------------------------
+            tool_round += 1
+            if tool_round > MAX_TOOL_ROUNDS:
+                logger.warning(
+                    "Exceeded MAX_TOOL_ROUNDS (%d) for session=%s; aborting loop",
+                    MAX_TOOL_ROUNDS,
+                    session_id,
+                )
+                yield {
+                    "type": "text",
+                    "text": f"\n\n[Error: exceeded maximum tool rounds ({MAX_TOOL_ROUNDS}); stopping.]",
+                }
+                break
+
+            # ------------------------------------------------------------------
             # Execute each tool and collect results for the next Claude turn
             # ------------------------------------------------------------------
             tool_results: list[dict[str, Any]] = []
@@ -324,7 +347,9 @@ async def chat(
                 # Signal to the UI that we are about to run this tool.
                 yield {"type": "tool_start", "name": tool_name, "input": tool_input}
 
-                dispatched = _dispatch_tool(tool_name, tool_input)
+                # Run the (blocking) tool in a thread pool so we don't stall
+                # other coroutines on the asyncio event loop.
+                dispatched = await asyncio.to_thread(_dispatch_tool, tool_name, tool_input)
                 is_error: bool = dispatched["is_error"]
                 content_str: str = dispatched["content"]
                 summary: str = dispatched["summary"]
@@ -351,6 +376,10 @@ async def chat(
             history.append({"role": "user", "content": tool_results})
 
     except Exception as exc:
+        # Roll back any history entries added during this failed turn so the
+        # session is not left in a broken state (e.g. a dangling user-only entry
+        # that the API would reject on the next call).
+        del history[snapshot:]
         logger.exception("Unhandled error in chat agentic loop (session=%s)", session_id)
         yield {"type": "text", "text": f"\n\n[Error: {exc}]"}
 

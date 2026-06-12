@@ -440,3 +440,109 @@ def test_clear_history_noop_for_missing_session():
     from app.chatbot import clear_history
 
     clear_history("does-not-exist")  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# History rollback on API exception
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_history_rolled_back_on_api_exception():
+    """
+    If the first API call raises, the dangling user message must be removed
+    from history so the session is not permanently broken.
+    """
+    from app import chatbot
+
+    mock_client = MagicMock()
+    mock_client.messages.stream.side_effect = RuntimeError("network failure")
+
+    with patch.object(chatbot, "_get_client", return_value=mock_client):
+        events = [e async for e in chatbot.chat("session-err", "Hello?")]
+
+    # done event must still be emitted
+    assert events[-1] == {"type": "done"}
+
+    # History must be empty — the user turn must have been rolled back
+    assert chatbot.get_history("session-err") == [], (
+        "Session history should be empty after a failed first call"
+    )
+
+
+# ---------------------------------------------------------------------------
+# MAX_TOOL_ROUNDS guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_max_tool_rounds_guard():
+    """
+    When the model keeps requesting tools beyond MAX_TOOL_ROUNDS, the loop
+    should stop and yield an error text event rather than looping forever.
+    """
+    from app import chatbot
+
+    # Build a tool block that the model will keep requesting
+    tool_block = _make_tool_use_block("t-inf", "run_sql", {"query": "SELECT 1"})
+
+    def _always_tool(**kwargs):
+        return _make_stream([], [tool_block], stop_reason="tool_use")
+
+    mock_client = MagicMock()
+    mock_client.messages.stream.side_effect = _always_tool
+
+    def _fake_dispatch(name, tool_input):
+        return {"content": '{"columns":[],"rows":[]}', "summary": "0 rows", "is_error": False}
+
+    with (
+        patch.object(chatbot, "_get_client", return_value=mock_client),
+        patch.object(chatbot, "_dispatch_tool", side_effect=_fake_dispatch),
+    ):
+        events = [e async for e in chatbot.chat("session-inf", "loop forever")]
+
+    # The loop must terminate
+    assert events[-1] == {"type": "done"}
+
+    # An error text event must have been emitted mentioning the round cap
+    error_events = [
+        e for e in events
+        if e["type"] == "text" and "exceeded" in e["text"].lower()
+    ]
+    assert error_events, "Expected an error text event when MAX_TOOL_ROUNDS is exceeded"
+
+    # The number of API calls must not exceed MAX_TOOL_ROUNDS + 1
+    # (one initial + MAX_TOOL_ROUNDS tool rounds before the guard fires)
+    assert mock_client.messages.stream.call_count <= chatbot.MAX_TOOL_ROUNDS + 1
+
+
+# ---------------------------------------------------------------------------
+# tools._safety_check — CTE with embedded write keyword
+# ---------------------------------------------------------------------------
+
+
+def test_safety_check_rejects_cte_with_delete():
+    """WITH … DELETE CTE must be blocked at the application layer."""
+    from app.tools import _safety_check
+
+    bad = "WITH x AS (SELECT 1) DELETE FROM customers"
+    result = _safety_check(bad)
+    assert result is not None, "_safety_check must reject CTE with DELETE"
+    assert "SELECT" in result or "allowed" in result.lower()
+
+
+def test_safety_check_rejects_cte_with_insert():
+    from app.tools import _safety_check
+
+    bad = "WITH x AS (SELECT id FROM orders) INSERT INTO log SELECT * FROM x"
+    result = _safety_check(bad)
+    assert result is not None, "_safety_check must reject CTE with INSERT"
+
+
+def test_safety_check_allows_plain_cte_select():
+    """A benign WITH … SELECT must still be allowed."""
+    from app.tools import _safety_check
+
+    good = "WITH totals AS (SELECT SUM(amount) AS s FROM orders) SELECT s FROM totals"
+    result = _safety_check(good)
+    assert result is None, f"Expected None (allowed) but got: {result}"

@@ -138,6 +138,15 @@ def _safety_check(query: str) -> str | None:
             f"Received statement starting with: {first_token or '(empty)'}"
         )
 
+    # Guard against write operations embedded inside a CTE body, e.g.
+    # "WITH x AS (SELECT 1) DELETE FROM customers".
+    if re.search(
+        r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|REPLACE)\b",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return "Only SELECT statements are allowed."
+
     return None
 
 
