@@ -533,7 +533,8 @@
       if (line.indexOf('event:') === 0) {
         event = line.slice(6).trim();
       } else if (line.indexOf('data:') === 0) {
-        data = line.slice(5).trim();
+        var chunk = line.slice(5).trim();
+        data = data ? data + '\n' + chunk : chunk;
       }
     }
     return { event: event, data: data };
@@ -646,6 +647,8 @@
 
             case 'done': {
               removeDots();
+              setStreaming(false);
+              inputEl.focus();
               // The fetch body will close naturally; we'll exit the while loop
               break;
             }
