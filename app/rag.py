@@ -123,7 +123,19 @@ def chunk_document(text: str, source: str) -> list[dict]:
 
 # Anchor to the project root regardless of CWD
 _ROOT = Path(__file__).parent.parent
-EMBEDDINGS_DB = _ROOT / "data" / "embeddings.db"
+
+
+def _get_embeddings_db() -> Path:
+    """Return the path to embeddings.db, respecting QUERIOUS_DATA_DIR if set."""
+    data_dir = os.environ.get("QUERIOUS_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "embeddings.db"
+    return _ROOT / "data" / "embeddings.db"
+
+
+# Module-level alias kept for backwards-compatibility.  Frozen at import time;
+# prefer _get_embeddings_db() internally.
+EMBEDDINGS_DB = _get_embeddings_db()
 
 
 class Chunk(TypedDict):
@@ -138,15 +150,16 @@ def search(query: str, top_k: int = 5) -> list[Chunk]:
     Embed *query* with Voyage AI and return the top-k most similar chunks
     from embeddings.db, ranked by cosine similarity.
     """
-    if not EMBEDDINGS_DB.exists():
+    embeddings_db = _get_embeddings_db()
+    if not embeddings_db.exists():
         raise FileNotFoundError(
-            f"Embeddings database not found: {EMBEDDINGS_DB}. "
+            f"Embeddings database not found: {embeddings_db}. "
             "Run scripts/build_index.py first."
         )
 
     query_vec = _embed_query(query)
 
-    conn = sqlite3.connect(EMBEDDINGS_DB)
+    conn = sqlite3.connect(embeddings_db)
     try:
         cur = conn.cursor()
         cur.execute("SELECT source, heading, text, embedding FROM chunks")

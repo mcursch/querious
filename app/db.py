@@ -2,20 +2,35 @@
 SQLite access helpers — read-only URI connection for the bot.
 """
 
+import os
 import re
 import sqlite3
 from pathlib import Path
 
 # Anchor to the project root regardless of CWD
 _ROOT = Path(__file__).parent.parent
-DB_PATH = _ROOT / "data" / "acme.db"
+
+
+def _get_db_path() -> Path:
+    """Return the path to acme.db, respecting QUERIOUS_DATA_DIR if set."""
+    data_dir = os.environ.get("QUERIOUS_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "acme.db"
+    return _ROOT / "data" / "acme.db"
+
+
+# Module-level alias kept for backwards-compatibility with any code that
+# imported DB_PATH directly.  Note: this value is frozen at import time and
+# will NOT reflect QUERIOUS_DATA_DIR changes; prefer _get_db_path() internally.
+DB_PATH = _get_db_path()
 
 
 def open_ro_connection() -> sqlite3.Connection:
     """Open acme.db in read-only mode via SQLite URI."""
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"Database not found: {DB_PATH}")
-    uri = f"file:{DB_PATH}?mode=ro"
+    db_path = _get_db_path()
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+    uri = f"file:{db_path}?mode=ro"
     conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
