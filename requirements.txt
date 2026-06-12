@@ -5,3 +5,4 @@ voyageai
 numpy
 python-dotenv
 sse-starlette
+cachetools

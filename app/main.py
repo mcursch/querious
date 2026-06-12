@@ -11,11 +11,13 @@ POST /chat       Accepts {session_id, message}; returns an SSE stream
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 # Anchor all file references to the project root, not the process CWD
 _ROOT = Path(__file__).parent.parent
 
+from cachetools import TTLCache
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -31,8 +33,16 @@ from app.chatbot import run_chat  # noqa: E402 (must be after load_dotenv)
 # Per-session conversation history
 # Key: session_id (str)
 # Value: list of message dicts (mutated in-place by the chatbot loop)
+#
+# Bounded by a TTLCache so the dict cannot grow without limit in a long-running
+# process.  At most MAX_SESSIONS entries are kept; an entry is evicted if it
+# has not been accessed within SESSION_TTL seconds (1 hour).
 # ---------------------------------------------------------------------------
-_conversation_histories: dict[str, list] = {}
+_MAX_SESSIONS: int = 1000
+_SESSION_TTL: int = 3600  # seconds
+
+_conversation_histories: TTLCache = TTLCache(maxsize=_MAX_SESSIONS, ttl=_SESSION_TTL)
+_histories_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # App
@@ -94,7 +104,8 @@ async def chat(request: ChatRequest) -> EventSourceResponse:
         tool_end    — {name, summary} when a tool call completes
         done        — turn complete; stream ends after this event
     """
-    history = _conversation_histories.setdefault(request.session_id, [])
+    with _histories_lock:
+        history = _conversation_histories.setdefault(request.session_id, [])
 
     async def _event_generator():
         try:
