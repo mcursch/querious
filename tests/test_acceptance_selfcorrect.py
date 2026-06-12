@@ -30,12 +30,46 @@ from tests.conftest import _parse_sse, _resp, _text_block, _tool_block
 
 
 # ---------------------------------------------------------------------------
+# Stream context-manager helper (mirrors test_e2e_sse._make_stream_cm)
+# ---------------------------------------------------------------------------
+
+def _make_stream_cm(response):
+    """Return an async context manager that mimics ``client.messages.stream()``.
+
+    The yielded stream object exposes:
+    - ``text_stream``    — async generator of text chunks
+    - ``get_final_message()`` — coroutine returning the scripted response
+    """
+
+    class _FakeStream:
+        @property
+        def text_stream(self):
+            async def _gen():
+                for block in response.content:
+                    if block.type == "text":
+                        yield block.text
+            return _gen()
+
+        async def get_final_message(self):
+            return response
+
+    class _FakeStreamCM:
+        async def __aenter__(self):
+            return _FakeStream()
+
+        async def __aexit__(self, *args):
+            pass
+
+    return _FakeStreamCM()
+
+
+# ---------------------------------------------------------------------------
 # Fixture — scripted self-correction scenario
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
 def mock_anthropic_selfcorrect():
-    """Mock Anthropic to simulate a self-correction loop over a bad table name.
+    """Mock AsyncAnthropic to simulate a self-correction loop over a bad table name.
 
     Call 1: get_schema  (Claude checks available tables)
     Call 2: run_sql with wrong table 'orderz' → real SQLite returns error
@@ -65,10 +99,14 @@ def mock_anthropic_selfcorrect():
         ),
     ]
 
-    with patch("anthropic.Anthropic") as MockCls:
+    scripted_iter = iter(scripted)
+
+    with patch("anthropic.AsyncAnthropic") as MockCls:
         mock_client = MagicMock()
         MockCls.return_value = mock_client
-        mock_client.messages.create.side_effect = scripted
+        mock_client.messages.stream.side_effect = (
+            lambda *args, **kwargs: _make_stream_cm(next(scripted_iter))
+        )
         yield MockCls
 
 
