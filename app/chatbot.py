@@ -32,6 +32,7 @@ from app.tools import execute_tool, summarise_result, TOOL_DEFINITIONS
 
 MODEL = "claude-opus-4-8"
 MAX_TOKENS = 16000  # generous headroom for thinking + long responses
+MAX_AGENT_ITERATIONS = 20  # guard against infinite tool-use loops (LIN-207)
 
 SYSTEM_PROMPT = """You are Querious, the internal AI assistant for Acme Outfitters, \
 an outdoor-gear retailer.
@@ -88,7 +89,7 @@ async def run_chat(
 
     client = _get_client()
 
-    while True:
+    for _iteration in range(MAX_AGENT_ITERATIONS):
         # ------------------------------------------------------------------ #
         # Stream one Claude turn                                               #
         # ------------------------------------------------------------------ #
@@ -175,6 +176,15 @@ async def run_chat(
 
         # Feed tool results back so the loop continues
         history.append({"role": "user", "content": tool_results})
+
+    # The loop exhausted MAX_AGENT_ITERATIONS without a non-tool-use response.
+    yield {
+        "type": "done",
+        "error": (
+            f"Agentic loop exceeded the maximum of {MAX_AGENT_ITERATIONS} iterations "
+            "without producing a final response. The conversation has been stopped."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------

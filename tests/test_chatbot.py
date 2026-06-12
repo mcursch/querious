@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 import pytest
 
-from app.chatbot import run_chat, _content_blocks_to_dicts, ChatSession, TurnResult, MODEL
+from app.chatbot import run_chat, _content_blocks_to_dicts, ChatSession, TurnResult, MODEL, MAX_AGENT_ITERATIONS
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +321,49 @@ class TestSelfCorrection:
             f"Expected at least 2 run_sql tool_start events (self-correction), got {len(run_sql_starts)}"
         )
         assert events[-1] == {"type": "done"}
+
+
+class TestMaxIterationGuard:
+    @pytest.mark.asyncio
+    async def test_exceeding_max_iterations_yields_done_with_error(self):
+        """If the model keeps returning tool_use, the loop must stop after
+        MAX_AGENT_ITERATIONS and yield a done event that carries an error."""
+
+        # Every stream turn returns a tool_use block so the loop never exits
+        # on its own.  We supply exactly MAX_AGENT_ITERATIONS fake streams.
+        def _make_tool_stream():
+            return _FakeStream(
+                text_chunks=[],
+                final_content=[_tool_use_block("tu_inf", "get_schema", {})],
+            )
+
+        streams = [_make_tool_stream() for _ in range(MAX_AGENT_ITERATIONS)]
+
+        events = await _collect([], "spin forever", streams)
+
+        done_events = [e for e in events if e["type"] == "done"]
+        assert len(done_events) == 1, "Expected exactly one done event"
+        done = done_events[0]
+        assert "error" in done, "done event should carry an error key on limit breach"
+        assert str(MAX_AGENT_ITERATIONS) in done["error"]
+
+    @pytest.mark.asyncio
+    async def test_loop_within_limit_succeeds_normally(self):
+        """A conversation that uses fewer than MAX_AGENT_ITERATIONS tool turns
+        should still end with a plain done event (no error key)."""
+        stream1 = _FakeStream(
+            text_chunks=[],
+            final_content=[_tool_use_block("tu1", "get_schema", {})],
+        )
+        stream2 = _FakeStream(
+            text_chunks=["Done."],
+            final_content=[_text_block("Done.")],
+        )
+        events = await _collect([], "one tool call", [stream1, stream2])
+
+        done_events = [e for e in events if e["type"] == "done"]
+        assert len(done_events) == 1
+        assert "error" not in done_events[0]
 
 
 class TestContentBlocksToDicts:
