@@ -71,6 +71,35 @@ class TestValidateQuery:
         err = _validate_query("EXPLAIN SELECT * FROM customers")
         assert err is not None
 
+    # --- punctuation-adjacent keyword bypass (LIN-197) ---
+
+    def test_pragma_adjacent_punctuation_rejected(self):
+        """PRAGMA attached to a comma must still be caught."""
+        err = _validate_query("SELECT PRAGMA,* FROM customers")
+        assert err is not None
+        assert "PRAGMA" in err
+
+    def test_drop_adjacent_punctuation_rejected(self):
+        """DROP attached to a comma must still be caught."""
+        err = _validate_query("SELECT DROP,id FROM customers")
+        assert err is not None
+        assert "DROP" in err
+
+    def test_insert_in_parentheses_rejected(self):
+        """INSERT wrapped in parens must still be caught."""
+        err = _validate_query("SELECT (INSERT) FROM customers")
+        assert err is not None
+
+    def test_update_with_leading_paren_rejected(self):
+        """UPDATE preceded by '(' must still be caught."""
+        err = _validate_query("WITH t AS (UPDATE customers SET name='x') SELECT * FROM t")
+        assert err is not None
+
+    def test_delete_adjacent_punctuation_rejected(self):
+        """DELETE attached to a comma must still be caught."""
+        err = _validate_query("SELECT DELETE,id FROM customers")
+        assert err is not None
+
 
 # ---------------------------------------------------------------------------
 # _enforce_limit
