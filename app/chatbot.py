@@ -17,7 +17,9 @@ Yields plain dicts:
 
 from __future__ import annotations
 
+import asyncio
 import os
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 import anthropic
@@ -141,7 +143,22 @@ async def run_chat(
 
             # Notify UI that the tool finished
             summary = summarise_result(block.name, result)
-            yield {"type": "tool_end", "name": block.name, "summary": summary}
+            end_event: dict[str, Any] = {
+                "type": "tool_end",
+                "name": block.name,
+                "summary": summary,
+            }
+            # Expose source filenames so callers (e.g. ChatSession) can populate
+            # TurnResult.sources without having to re-invoke the tool.
+            if (
+                block.name == "search_docs"
+                and isinstance(result, dict)
+                and "chunks" in result
+            ):
+                end_event["sources"] = [
+                    c["source"] for c in result["chunks"] if "source" in c
+                ]
+            yield end_event
 
             tool_results.append(
                 {
@@ -158,6 +175,78 @@ async def run_chat(
 
         # Feed tool results back so the loop continues
         history.append({"role": "user", "content": tool_results})
+
+
+# ---------------------------------------------------------------------------
+# Synchronous session wrapper
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TurnResult:
+    """Holds the full output of a single chat turn.
+
+    Attributes:
+        text:       The complete assistant response text for this turn.
+        sources:    Deduplicated list of document source filenames cited by
+                    any ``search_docs`` tool calls made during the turn.
+        tool_calls: Ordered list of tool invocations, each a dict with at
+                    minimum a ``"name"`` key and an ``"input"`` key.
+    """
+
+    text: str
+    sources: list[str] = field(default_factory=list)
+    tool_calls: list[dict] = field(default_factory=list)
+
+
+class ChatSession:
+    """Synchronous wrapper around the :func:`run_chat` agentic loop.
+
+    Maintains conversation history across turns so that each call to
+    :meth:`send_message` continues the same multi-turn conversation.
+
+    Example::
+
+        session = ChatSession()
+        result = session.send_message("What is the return policy on used tents?")
+        print(result.text)
+        print(result.sources)   # e.g. ['return_refund_policy.md']
+    """
+
+    def __init__(self) -> None:
+        self._history: list[dict] = []
+
+    def send_message(self, message: str) -> TurnResult:
+        """Run one turn synchronously and return a :class:`TurnResult`.
+
+        The internal conversation history is updated in-place so subsequent
+        calls continue where the previous turn left off.
+        """
+        text_parts: list[str] = []
+        tool_calls: list[dict] = []
+        # Use a dict keyed by source to preserve insertion order while
+        # deduplicating across multiple search_docs calls in the same turn.
+        seen_sources: dict[str, None] = {}
+
+        async def _collect() -> None:
+            async for event in run_chat(self._history, message):
+                if event["type"] == "text":
+                    text_parts.append(event["text"])
+                elif event["type"] == "tool_start":
+                    tool_calls.append(
+                        {"name": event["name"], "input": event.get("input", {})}
+                    )
+                elif event["type"] == "tool_end":
+                    for src in event.get("sources", []):
+                        seen_sources[src] = None
+
+        asyncio.run(_collect())
+
+        return TurnResult(
+            text="".join(text_parts),
+            sources=list(seen_sources),
+            tool_calls=tool_calls,
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 import pytest
 
-from app.chatbot import run_chat, _content_blocks_to_dicts
+from app.chatbot import run_chat, _content_blocks_to_dicts, ChatSession, TurnResult
 
 
 # ---------------------------------------------------------------------------
@@ -346,3 +346,169 @@ class TestContentBlocksToDicts:
         result = _content_blocks_to_dicts(blocks)
         types = [b["type"] for b in result]
         assert types == ["thinking", "text", "tool_use"]
+
+
+# ---------------------------------------------------------------------------
+# TurnResult and ChatSession
+# ---------------------------------------------------------------------------
+
+
+class TestTurnResult:
+    def test_dataclass_fields(self):
+        tr = TurnResult(text="hello", sources=["policy.md"], tool_calls=[{"name": "search_docs", "input": {}}])
+        assert tr.text == "hello"
+        assert tr.sources == ["policy.md"]
+        assert tr.tool_calls[0]["name"] == "search_docs"
+
+    def test_default_empty_lists(self):
+        tr = TurnResult(text="hi")
+        assert tr.sources == []
+        assert tr.tool_calls == []
+
+
+class TestChatSession:
+    """Unit tests for ChatSession.send_message using the same mocking pattern."""
+
+    def _make_session_with_streams(self, mock_streams, mock_tools=None):
+        """Return a (session, call) pair.  Call session.send_message() inside
+        the patch context to drive the fake streams."""
+        stream_iter = iter(mock_streams)
+
+        def _fake_stream(*args, **kwargs):
+            return next(stream_iter)
+
+        async def _fake_execute_tool(name, input_dict):
+            if mock_tools and name in mock_tools:
+                return mock_tools[name]
+            return {"content": "tool output", "is_error": False}
+
+        session = ChatSession()
+        return session, _fake_stream, _fake_execute_tool
+
+    def test_send_message_returns_turn_result(self):
+        stream = _FakeStream(
+            text_chunks=["Hello ", "world"],
+            final_content=[_text_block("Hello world")],
+        )
+        session, fake_stream, fake_tool = self._make_session_with_streams([stream])
+        with (
+            patch("app.chatbot._get_client") as mock_client,
+            patch("app.chatbot.execute_tool", side_effect=fake_tool),
+        ):
+            client_instance = MagicMock()
+            client_instance.messages.stream.side_effect = fake_stream
+            mock_client.return_value = client_instance
+            result = session.send_message("hi")
+
+        assert isinstance(result, TurnResult)
+        assert result.text == "Hello world"
+        assert result.sources == []
+        assert result.tool_calls == []
+
+    def test_send_message_collects_tool_calls(self):
+        stream1 = _FakeStream(
+            text_chunks=[],
+            final_content=[_tool_use_block("tu1", "search_docs", {"query": "return policy"})],
+        )
+        stream2 = _FakeStream(
+            text_chunks=["Policy says 30 days."],
+            final_content=[_text_block("Policy says 30 days.")],
+        )
+        fake_search_result = {
+            "chunks": [
+                {"source": "return_refund_policy.md", "heading": "Returns", "text": "...", "score": 0.9}
+            ],
+            "count": 1,
+        }
+        session, fake_stream, _ = self._make_session_with_streams(
+            [stream1, stream2], mock_tools={"search_docs": fake_search_result}
+        )
+
+        async def _fake_execute_tool(name, input_dict):
+            return fake_search_result
+
+        with (
+            patch("app.chatbot._get_client") as mock_client,
+            patch("app.chatbot.execute_tool", side_effect=_fake_execute_tool),
+        ):
+            client_instance = MagicMock()
+            client_instance.messages.stream.side_effect = fake_stream
+            mock_client.return_value = client_instance
+            result = session.send_message("what is the return policy?")
+
+        assert result.text == "Policy says 30 days."
+        assert any(tc["name"] == "search_docs" for tc in result.tool_calls)
+        assert "return_refund_policy.md" in result.sources
+
+    def test_send_message_deduplicates_sources(self):
+        """Two search_docs calls with overlapping sources yield deduplicated list."""
+        stream1 = _FakeStream(
+            text_chunks=[],
+            final_content=[
+                _tool_use_block("tu1", "search_docs", {"query": "premium SLA"}),
+                _tool_use_block("tu2", "search_docs", {"query": "open tickets"}),
+            ],
+        )
+        stream2 = _FakeStream(
+            text_chunks=["Answer here."],
+            final_content=[_text_block("Answer here.")],
+        )
+        fake_result = {
+            "chunks": [{"source": "sla.md", "heading": "SLA", "text": "...", "score": 0.8}],
+            "count": 1,
+        }
+
+        async def _fake_execute_tool(name, input_dict):
+            return fake_result
+
+        stream_calls = iter([stream1, stream2])
+
+        def _fake_stream(*a, **kw):
+            return next(stream_calls)
+
+        session = ChatSession()
+        with (
+            patch("app.chatbot._get_client") as mock_client,
+            patch("app.chatbot.execute_tool", side_effect=_fake_execute_tool),
+        ):
+            client_instance = MagicMock()
+            client_instance.messages.stream.side_effect = _fake_stream
+            mock_client.return_value = client_instance
+            result = session.send_message("premium support SLA question")
+
+        # sla.md should appear exactly once even though two search_docs calls returned it
+        assert result.sources.count("sla.md") == 1
+
+    def test_history_persists_across_turns(self):
+        """History grows: the second turn sees messages from the first."""
+        stream = _FakeStream(
+            text_chunks=["Turn 1 response."],
+            final_content=[_text_block("Turn 1 response.")],
+        )
+        stream2 = _FakeStream(
+            text_chunks=["Turn 2 response."],
+            final_content=[_text_block("Turn 2 response.")],
+        )
+
+        async def _fake_execute_tool(name, input_dict):
+            return {"content": "ok", "is_error": False}
+
+        streams = iter([stream, stream2])
+
+        def _fake_stream(*a, **kw):
+            return next(streams)
+
+        session = ChatSession()
+        with (
+            patch("app.chatbot._get_client") as mock_client,
+            patch("app.chatbot.execute_tool", side_effect=_fake_execute_tool),
+        ):
+            client_instance = MagicMock()
+            client_instance.messages.stream.side_effect = _fake_stream
+            mock_client.return_value = client_instance
+            session.send_message("first question")
+            # After first turn history has user + assistant messages
+            assert len(session._history) == 2
+            session.send_message("follow-up question")
+            # After second turn history has 4 messages
+            assert len(session._history) == 4
