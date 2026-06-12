@@ -162,7 +162,7 @@ def ask(client: TestClient, question: str) -> Tuple[List[dict], str]:
         events = _parse_events(response.iter_lines())
 
     full_text = "".join(
-        e.get("delta", "") for e in events if e.get("type") == "text"
+        e.get("text", "") for e in events if e.get("type") == "text"
     )
     return events, full_text
 
