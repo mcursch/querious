@@ -29,7 +29,7 @@ from app import tools
 # Configuration
 # ---------------------------------------------------------------------------
 
-MODEL = "claude-opus-4-8"
+MODEL = "claude-opus-4-5"
 MAX_TOKENS = 16000  # generous headroom for thinking + long responses
 
 SYSTEM_PROMPT = """You are Querious, the internal AI assistant for Acme Outfitters, \
@@ -87,7 +87,7 @@ async def get_response_stream(
             messages=history,
             tools=tools.TOOL_DEFINITIONS,
             max_tokens=MAX_TOKENS,
-            thinking={"type": "adaptive", "budget_tokens": 8000},
+            thinking={"type": "enabled", "budget_tokens": 8000},
         ) as stream:
             async for event in stream:
                 if (

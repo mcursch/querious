@@ -13,7 +13,9 @@ from typing import TypedDict
 
 import numpy as np
 
-EMBEDDINGS_DB = Path("data/embeddings.db")
+# Anchor to the project root regardless of CWD
+_ROOT = Path(__file__).parent.parent
+EMBEDDINGS_DB = _ROOT / "data" / "embeddings.db"
 
 
 class Chunk(TypedDict):

@@ -13,6 +13,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+# Anchor all file references to the project root, not the process CWD
+_ROOT = Path(__file__).parent.parent
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -46,7 +49,7 @@ app = FastAPI(title="Querious", description="AI chatbot for Acme Outfitters")
 @app.get("/")
 async def serve_index() -> FileResponse:
     """Serve the static chat UI."""
-    index_path = Path("static/index.html")
+    index_path = _ROOT / "static" / "index.html"
     return FileResponse(index_path, media_type="text/html")
 
 
@@ -57,8 +60,8 @@ async def health() -> JSONResponse:
 
     Returns 200 when both database files are present, 503 otherwise.
     """
-    acme_db = Path("data/acme.db")
-    embeddings_db = Path("data/embeddings.db")
+    acme_db = _ROOT / "data" / "acme.db"
+    embeddings_db = _ROOT / "data" / "embeddings.db"
 
     acme_ok = acme_db.exists()
     embeddings_ok = embeddings_db.exists()

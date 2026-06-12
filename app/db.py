@@ -5,7 +5,9 @@ SQLite access helpers — read-only URI connection for the bot.
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path("data/acme.db")
+# Anchor to the project root regardless of CWD
+_ROOT = Path(__file__).parent.parent
+DB_PATH = _ROOT / "data" / "acme.db"
 
 
 def open_ro_connection() -> sqlite3.Connection:

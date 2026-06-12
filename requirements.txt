@@ -2,7 +2,6 @@ fastapi
 uvicorn[standard]
 anthropic
 voyageai
-faker
 numpy
 python-dotenv
 sse-starlette

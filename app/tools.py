@@ -9,6 +9,7 @@ Three tools:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -86,13 +87,17 @@ async def execute_tool(name: str, tool_input: dict[str, Any]) -> Any:
     Returns either a plain string or a JSON-serialisable object.
     On validation / execution errors, returns a dict with ``is_error: true``
     so Claude can self-correct.
+
+    All underlying tool implementations use synchronous blocking IO (sqlite3,
+    voyageai.Client.embed).  We offload them to a thread pool via
+    asyncio.to_thread() so the event loop is never blocked.
     """
     if name == "search_docs":
-        return _search_docs(tool_input.get("query", ""))
+        return await asyncio.to_thread(_search_docs, tool_input.get("query", ""))
     if name == "get_schema":
-        return _get_schema()
+        return await asyncio.to_thread(_get_schema)
     if name == "run_sql":
-        return _run_sql(tool_input.get("query", ""))
+        return await asyncio.to_thread(_run_sql, tool_input.get("query", ""))
     return {"is_error": True, "error": f"Unknown tool: {name!r}"}
 
 
