@@ -21,9 +21,39 @@ from tests.conftest import _parse_sse, _resp, _text_block, _tool_block
 # Fixtures
 # ---------------------------------------------------------------------------
 
+def _make_stream_cm(response):
+    """Return an async context manager that mimics ``client.messages.stream()``.
+
+    The yielded stream object exposes:
+    - ``text_stream``    — async generator of text chunks
+    - ``get_final_message()`` — coroutine returning the scripted response
+    """
+
+    class _FakeStream:
+        @property
+        def text_stream(self):
+            async def _gen():
+                for block in response.content:
+                    if block.type == "text":
+                        yield block.text
+            return _gen()
+
+        async def get_final_message(self):
+            return response
+
+    class _FakeStreamCM:
+        async def __aenter__(self):
+            return _FakeStream()
+
+        async def __aexit__(self, *args):
+            pass
+
+    return _FakeStreamCM()
+
+
 @pytest.fixture()
 def mock_anthropic_simple():
-    """Mock Anthropic with a three-step SQL scenario.
+    """Mock AsyncAnthropic with a three-step SQL scenario.
 
     Step 1 — LLM decides to inspect the schema.
     Step 2 — LLM runs a COUNT query.
@@ -38,10 +68,14 @@ def mock_anthropic_simple():
         _resp([_text_block("We currently have 3 customers in the database.")], "end_turn"),
     ]
 
-    with patch("anthropic.Anthropic") as MockCls:
+    scripted_iter = iter(scripted)
+
+    with patch("anthropic.AsyncAnthropic") as MockCls:
         mock_client = MagicMock()
         MockCls.return_value = mock_client
-        mock_client.messages.create.side_effect = scripted
+        mock_client.messages.stream.side_effect = (
+            lambda *args, **kwargs: _make_stream_cm(next(scripted_iter))
+        )
         yield MockCls
 
 
