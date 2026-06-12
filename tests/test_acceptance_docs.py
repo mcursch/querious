@@ -31,7 +31,12 @@ _SKIP_REASON = (
     + (str(_EMBED_DB) if not _EMBED_DB.exists() else "")
 ).strip()
 
-pytestmark = pytest.mark.skipif(_DATABASES_MISSING, reason=_SKIP_REASON)
+_API_KEY_MISSING = not os.environ.get("ANTHROPIC_API_KEY")
+
+pytestmark = [
+    pytest.mark.skipif(_DATABASES_MISSING, reason=_SKIP_REASON),
+    pytest.mark.skipif(_API_KEY_MISSING, reason="ANTHROPIC_API_KEY is not set"),
+]
 
 # ---------------------------------------------------------------------------
 # Import chatbot (after skip guards so collection works even without app/)
