@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+anthropic>=0.25.0
+voyageai
+faker
+numpy
+python-dotenv
+sse-starlette
+pytest
+pytest-asyncio

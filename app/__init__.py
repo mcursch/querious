@@ -1,0 +1,1 @@
+# Querious application package
