@@ -30,7 +30,7 @@ from app.tools import execute_tool, summarise_result, TOOL_DEFINITIONS
 # Configuration
 # ---------------------------------------------------------------------------
 
-MODEL = "claude-opus-4-5"
+MODEL = "claude-opus-4-8"
 MAX_TOKENS = 16000  # generous headroom for thinking + long responses
 
 SYSTEM_PROMPT = """You are Querious, the internal AI assistant for Acme Outfitters, \

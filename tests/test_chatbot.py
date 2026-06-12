@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 import pytest
 
-from app.chatbot import run_chat, _content_blocks_to_dicts, ChatSession, TurnResult
+from app.chatbot import run_chat, _content_blocks_to_dicts, ChatSession, TurnResult, MODEL
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +121,12 @@ async def _collect(history, message, mock_streams, mock_tools=None):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+class TestModelIdentifier:
+    def test_model_matches_spec(self):
+        """SPEC §1 and §6 require claude-opus-4-8 (LIN-206)."""
+        assert MODEL == "claude-opus-4-8"
 
 
 class TestRunChatAlwaysEndWithDone:
