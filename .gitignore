@@ -1,0 +1,7 @@
+.env
+data/acme.db
+data/embeddings.db
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
