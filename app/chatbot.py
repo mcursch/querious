@@ -1,29 +1,28 @@
 """
-Claude agentic loop with SSE event streaming.
+Claude agentic loop with event streaming.
 
 Exported interface
 ------------------
-    async def get_response_stream(
+    async def run_chat(
         history: list[dict],
         user_message: str,
-    ) -> AsyncIterator[dict[str, str]]:
+    ) -> AsyncIterator[dict]:
 
-Yields dicts shaped for sse-starlette:
-    {"event": "text",       "data": '{"text": "..."}'}
-    {"event": "tool_start", "data": '{"name": "...", "input": {...}}'}
-    {"event": "tool_end",   "data": '{"name": "...", "summary": "..."}'}
-    {"event": "done",       "data": "{}"}
+Yields plain dicts:
+    {"type": "text",       "text": "..."}
+    {"type": "tool_start", "name": "...", "input": {...}}
+    {"type": "tool_end",   "name": "...", "summary": "..."}
+    {"type": "done"}
 """
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, AsyncIterator
 
 import anthropic
 
-from app import tools
+from app.tools import execute_tool, summarise_result, TOOL_DEFINITIONS
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -59,23 +58,33 @@ Do not give up after a single failure.
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_client() -> anthropic.AsyncAnthropic:
+    """Return an AsyncAnthropic client (isolated here so tests can mock it)."""
+    return anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-async def get_response_stream(
+async def run_chat(
     history: list[dict],
     user_message: str,
-) -> AsyncIterator[dict[str, str]]:
+) -> AsyncIterator[dict]:
     """
     Add *user_message* to *history*, run the agentic Claude loop, and yield
-    SSE event dicts until the turn is fully complete.
+    event dicts until the turn is fully complete.
 
     *history* is mutated in-place so the caller's reference stays up-to-date.
     """
     history.append({"role": "user", "content": user_message})
 
-    client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    client = _get_client()
 
     while True:
         # ------------------------------------------------------------------ #
@@ -85,19 +94,13 @@ async def get_response_stream(
             model=MODEL,
             system=SYSTEM_PROMPT,
             messages=history,
-            tools=tools.TOOL_DEFINITIONS,
+            tools=TOOL_DEFINITIONS,
             max_tokens=MAX_TOKENS,
             thinking={"type": "enabled", "budget_tokens": 8000},
         ) as stream:
-            async for event in stream:
-                if (
-                    event.type == "content_block_delta"
-                    and event.delta.type == "text_delta"
-                ):
-                    yield {
-                        "event": "text",
-                        "data": json.dumps({"text": event.delta.text}),
-                    }
+            async for chunk in stream.text_stream:
+                if chunk:
+                    yield {"type": "text", "text": chunk}
 
             final_message = await stream.get_final_message()
 
@@ -107,44 +110,38 @@ async def get_response_stream(
         history.append(
             {
                 "role": "assistant",
-                "content": _blocks_to_history(final_message.content),
+                "content": _content_blocks_to_dicts(final_message.content),
             }
         )
 
         # ------------------------------------------------------------------ #
         # Determine whether the turn ended with tool calls                     #
         # ------------------------------------------------------------------ #
-        if final_message.stop_reason != "tool_use":
-            yield {"event": "done", "data": "{}"}
+        tool_use_blocks = [
+            b for b in final_message.content if b.type == "tool_use"
+        ]
+        if not tool_use_blocks:
+            yield {"type": "done"}
             return
 
         # ------------------------------------------------------------------ #
         # Execute tool calls and stream progress events                        #
         # ------------------------------------------------------------------ #
-        tool_use_blocks = [
-            b for b in final_message.content if b.type == "tool_use"
-        ]
         tool_results: list[dict] = []
 
         for block in tool_use_blocks:
             tool_input: dict[str, Any] = block.input  # type: ignore[assignment]
 
             # Notify UI that a tool is starting
-            yield {
-                "event": "tool_start",
-                "data": json.dumps({"name": block.name, "input": tool_input}),
-            }
+            yield {"type": "tool_start", "name": block.name, "input": tool_input}
 
             # Execute
-            result = await tools.execute_tool(block.name, tool_input)
+            result = await execute_tool(block.name, tool_input)
             is_error = isinstance(result, dict) and result.get("is_error", False)
 
             # Notify UI that the tool finished
-            summary = tools.summarise_result(block.name, result)
-            yield {
-                "event": "tool_end",
-                "data": json.dumps({"name": block.name, "summary": summary}),
-            }
+            summary = summarise_result(block.name, result)
+            yield {"type": "tool_end", "name": block.name, "summary": summary}
 
             tool_results.append(
                 {
@@ -153,7 +150,7 @@ async def get_response_stream(
                     "content": (
                         result
                         if isinstance(result, str)
-                        else json.dumps(result)
+                        else str(result)
                     ),
                     **({"is_error": True} if is_error else {}),
                 }
@@ -168,7 +165,7 @@ async def get_response_stream(
 # ---------------------------------------------------------------------------
 
 
-def _blocks_to_history(content_blocks: list) -> list[dict]:
+def _content_blocks_to_dicts(content_blocks: list) -> list[dict]:
     """
     Convert API response content blocks to plain dicts suitable for storing
     in the history list and re-sending to the API.

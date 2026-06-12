@@ -25,7 +25,7 @@ from sse_starlette.sse import EventSourceResponse
 # Load .env before anything else so ANTHROPIC_API_KEY / VOYAGE_API_KEY are set
 load_dotenv()
 
-from app.chatbot import get_response_stream  # noqa: E402 (must be after load_dotenv)
+from app.chatbot import run_chat  # noqa: E402 (must be after load_dotenv)
 
 # ---------------------------------------------------------------------------
 # Per-session conversation history
@@ -98,8 +98,22 @@ async def chat(request: ChatRequest) -> EventSourceResponse:
 
     async def _event_generator():
         try:
-            async for event in get_response_stream(history, request.message):
-                yield event
+            async for event in run_chat(history, request.message):
+                event_type = event["type"]
+                if event_type == "text":
+                    yield {"event": "text", "data": json.dumps({"text": event["text"]})}
+                elif event_type == "tool_start":
+                    yield {
+                        "event": "tool_start",
+                        "data": json.dumps({"name": event["name"], "input": event["input"]}),
+                    }
+                elif event_type == "tool_end":
+                    yield {
+                        "event": "tool_end",
+                        "data": json.dumps({"name": event["name"], "summary": event["summary"]}),
+                    }
+                elif event_type == "done":
+                    yield {"event": "done", "data": "{}"}
         except Exception as exc:  # noqa: BLE001
             # Surface errors to the client as a done event with an error field
             # so the UI isn't left in a spinning state.
