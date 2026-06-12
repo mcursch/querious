@@ -46,6 +46,18 @@ async def chat(request: ChatRequest):
     return EventSourceResponse(event_stream())
 
 
+@app.delete("/session/{session_id}")
+async def delete_session(session_id: str):
+    """Evict a session from the in-memory history store.
+
+    Calling this endpoint prevents unbounded growth of the ``_sessions`` dict
+    for long-running servers.  Clients should call it when a conversation is
+    finished.
+    """
+    chatbot.clear_session(session_id)
+    return JSONResponse({"deleted": session_id})
+
+
 @app.get("/health")
 async def health():
     """Liveness probe.  Checks whether both SQLite DB files are present."""

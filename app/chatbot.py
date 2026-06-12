@@ -6,6 +6,7 @@ next LLM call.
 """
 
 import json
+import os
 from typing import Generator
 
 import anthropic
@@ -148,7 +149,7 @@ def chat_stream(
 
     for _ in range(MAX_ITERATIONS):
         response = client.messages.create(
-            model="claude-opus-4-8",
+            model=os.environ.get("QUERIOUS_MODEL", "claude-opus-4-5"),
             max_tokens=8192,
             system=SYSTEM_PROMPT,
             tools=TOOLS_DEFINITION,

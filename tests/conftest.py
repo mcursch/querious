@@ -1,4 +1,4 @@
-"""Shared pytest fixtures.
+"""Shared pytest fixtures and test helpers.
 
 The ``setup_test_data`` fixture (session-scoped, autouse) creates a pair of
 minimal SQLite databases in a temporary directory and points the app at that
@@ -6,10 +6,68 @@ directory via the QUERIOUS_DATA_DIR environment variable before any test runs.
 This keeps tests hermetic and avoids touching any data/ directory in the repo.
 """
 
+import json
 import os
 import sqlite3
+from unittest.mock import MagicMock
 
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# SSE helpers
+# ---------------------------------------------------------------------------
+
+def _parse_sse(raw: str) -> list[dict]:
+    """Parse raw SSE text into a list of ``{"type": ..., "data": ...}`` dicts.
+
+    Handles both LF-only and CRLF line endings (sse-starlette emits CRLF).
+    """
+    # Normalise to LF so the rest of the logic is uniform.
+    normalised = raw.replace("\r\n", "\n")
+    events: list[dict] = []
+    for block in normalised.split("\n\n"):
+        event_type: str | None = None
+        data = None
+        for line in block.strip().splitlines():
+            if line.startswith("event:"):
+                event_type = line[len("event:"):].strip()
+            elif line.startswith("data:"):
+                raw_data = line[len("data:"):].strip()
+                try:
+                    data = json.loads(raw_data)
+                except json.JSONDecodeError:
+                    data = raw_data
+        if event_type is not None:
+            events.append({"type": event_type, "data": data})
+    return events
+
+
+# ---------------------------------------------------------------------------
+# Mock factory helpers
+# ---------------------------------------------------------------------------
+
+def _text_block(text: str) -> MagicMock:
+    b = MagicMock()
+    b.type = "text"
+    b.text = text
+    return b
+
+
+def _tool_block(name: str, input_data: dict, tool_id: str) -> MagicMock:
+    b = MagicMock()
+    b.type = "tool_use"
+    b.id = tool_id
+    b.name = name
+    b.input = input_data
+    return b
+
+
+def _resp(blocks: list, stop_reason: str) -> MagicMock:
+    r = MagicMock()
+    r.content = blocks
+    r.stop_reason = stop_reason
+    return r
 
 # ---------------------------------------------------------------------------
 # Minimal schema (mirrors SPEC §3, trimmed to what the tests exercise)
