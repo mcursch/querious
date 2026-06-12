@@ -1,0 +1,5 @@
+*.pyc merge=ours
+*.pyo merge=ours
+.coverage merge=ours
+*.db merge=ours
+*.sqlite3 merge=ours
