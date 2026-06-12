@@ -1,0 +1,8 @@
+# Generated databases
+data/acme.db
+data/embeddings.db
+
+# Python bytecode
+**/__pycache__/
+**/*.pyc
+**/*.pyo
