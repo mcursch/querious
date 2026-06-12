@@ -118,5 +118,5 @@ def test_health_both_dbs_present(setup_test_data):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert body["acme_db"] is True, f"Expected acme_db=true, got: {body}"
-    assert body["embeddings_db"] is True, f"Expected embeddings_db=true, got: {body}"
+    assert body["databases"]["acme_db"] is True, f"Expected acme_db=true, got: {body}"
+    assert body["databases"]["embeddings_db"] is True, f"Expected embeddings_db=true, got: {body}"
