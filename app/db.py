@@ -2,6 +2,7 @@
 SQLite access helpers — read-only URI connection for the bot.
 """
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -83,27 +84,40 @@ def execute_query(sql: str, timeout_seconds: int = 5) -> list[dict]:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _validate_sql(sql: str) -> None:
-    """Reject anything that isn't a plain SELECT or CTE SELECT."""
+def _validate_query(sql: str) -> str | None:
+    """
+    Validate *sql* for safety.
+
+    Returns ``None`` if the query is acceptable, or an error-message string
+    describing the problem if it is not.  Does not raise.
+    """
     stripped = sql.strip().rstrip(";")
 
     # Only single statements
     if ";" in stripped:
-        raise ValueError("Multiple statements are not allowed.")
+        return "Multiple statements are not allowed."
 
     upper = stripped.upper()
 
     # Must start with SELECT or a CTE (WITH ... SELECT)
     if not (upper.startswith("SELECT") or upper.startswith("WITH")):
-        raise ValueError(
-            "Only SELECT (or WITH … SELECT) queries are allowed."
-        )
+        return "Only SELECT (or WITH … SELECT) queries are allowed."
 
-    # Reject dangerous keywords
+    # Reject dangerous keywords (use word-boundary regex so that keywords
+    # attached to punctuation such as "(UPDATE" are still caught).
     forbidden = {"PRAGMA", "ATTACH", "DETACH", "DROP", "INSERT", "UPDATE", "DELETE"}
     for kw in forbidden:
-        if kw in upper.split():
-            raise ValueError(f"Keyword {kw!r} is not allowed.")
+        if re.search(r"\b" + kw + r"\b", upper):
+            return f"Keyword {kw!r} is not allowed."
+
+    return None
+
+
+def _validate_sql(sql: str) -> None:
+    """Reject anything that isn't a plain SELECT or CTE SELECT (raises ValueError)."""
+    error = _validate_query(sql)
+    if error is not None:
+        raise ValueError(error)
 
 
 def _enforce_limit(sql: str) -> str:
