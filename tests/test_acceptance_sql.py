@@ -39,8 +39,8 @@ import re
 import uuid
 from typing import List, Tuple
 
-import httpx
 import pytest
+from starlette.testclient import TestClient
 
 from app.main import app  # available only in a fully set-up environment
 
@@ -59,16 +59,15 @@ PRODUCT_CATEGORIES: frozenset[str] = frozenset(
 
 
 @pytest.fixture(scope="module")
-def http_client() -> httpx.Client:
+def http_client() -> TestClient:
     """
-    Synchronous httpx client wired to the FastAPI ASGI app.
+    Synchronous Starlette TestClient wired to the FastAPI ASGI app.
 
-    Using ``httpx.ASGITransport`` avoids the starlette TestClient deprecation
-    warning (starlette ≥ 1.3 requires ``httpx2`` for its TestClient) and gives
-    us clean streaming support for SSE.
+    ``TestClient`` (which inherits from ``httpx.Client``) uses a built-in
+    synchronous ASGI transport, so ``client.stream(...)`` and SSE iteration
+    work correctly without requiring an async event loop.
     """
-    transport = httpx.ASGITransport(app=app)
-    with httpx.Client(transport=transport, base_url="http://testserver") as client:
+    with TestClient(app, base_url="http://testserver") as client:
         yield client
 
 
@@ -105,7 +104,8 @@ def _parse_events(lines) -> List[dict]:
         if line.startswith("event:"):
             pending_type = line[len("event:"):].strip()
         elif line.startswith("data:"):
-            pending_data = line[len("data:"):].strip()
+            raw_value = line[len("data:"):].strip()
+            pending_data = (pending_data + "\n" + raw_value) if pending_data else raw_value
         elif line == "":
             # blank line → dispatch accumulated frame
             if pending_data:
@@ -133,7 +133,7 @@ def _parse_events(lines) -> List[dict]:
     return events
 
 
-def ask(client: httpx.Client, question: str) -> Tuple[List[dict], str]:
+def ask(client: TestClient, question: str) -> Tuple[List[dict], str]:
     """
     POST *question* to ``/chat``, consume the full SSE stream, and return
     ``(events, full_text)``.
@@ -181,13 +181,13 @@ def _run_sql_starts(events: List[dict]) -> List[dict]:
 
 
 @pytest.fixture(scope="module")
-def q2_result(http_client: httpx.Client) -> Tuple[List[dict], str]:
+def q2_result(http_client: TestClient) -> Tuple[List[dict], str]:
     """Q2: California customer count."""
     return ask(http_client, "How many customers do we have in California?")
 
 
 @pytest.fixture(scope="module")
-def q3_result(http_client: httpx.Client) -> Tuple[List[dict], str]:
+def q3_result(http_client: TestClient) -> Tuple[List[dict], str]:
     """Q3: Overdue invoices with JOIN."""
     return ask(
         http_client,
@@ -196,7 +196,7 @@ def q3_result(http_client: httpx.Client) -> Tuple[List[dict], str]:
 
 
 @pytest.fixture(scope="module")
-def q5_result(http_client: httpx.Client) -> Tuple[List[dict], str]:
+def q5_result(http_client: TestClient) -> Tuple[List[dict], str]:
     """Q5: Best-selling product category by revenue."""
     return ask(
         http_client,
@@ -329,18 +329,20 @@ class TestQ5BestSellingCategoryByRevenue:
         """
         A revenue summary should include a dollar-denominated figure.
 
-        Matches patterns such as ``$12,345.67`` or ``$98765`` (explicit dollar
-        sign) and also falls back to any bare large number (≥ 4 digits) in
-        case the model elides the currency symbol while still reporting a
-        dollar amount.
+        Matches explicit dollar-sign patterns such as ``$12,345.67`` or
+        ``$98765``, or a bare number that is immediately preceded by a
+        currency keyword (``revenue``, ``total``, or ``$``) so that incidental
+        four-digit numbers like years do not produce a false pass.
         """
         _, text = q5_result
-        dollar_pattern = r"\$\s*[\d,]+(?:\.\d{1,2})?"
-        large_number_pattern = r"\b\d{4,}(?:,\d{3})*(?:\.\d{1,2})?\b"
-        has_revenue = bool(re.search(dollar_pattern, text)) or bool(
-            re.search(large_number_pattern, text)
+        # Explicit dollar sign: "$12,345.67" or "$98765"
+        dollar_sign_pattern = r"\$\s*[\d,]+(?:\.\d{1,2})?"
+        # Bare number only when preceded by a revenue/currency keyword
+        currency_word_pattern = r"(?:revenue|total|\$)\s*[\d,]{4,}"
+        has_revenue = bool(re.search(dollar_sign_pattern, text)) or bool(
+            re.search(currency_word_pattern, text, re.IGNORECASE)
         )
         assert has_revenue, (
-            "Expected a revenue figure (e.g. '$12,345.67') in the answer; "
-            f"none found.\n\nFull response:\n{text}"
+            "Expected a revenue figure (e.g. '$12,345.67' or 'revenue 98765') "
+            f"in the answer; none found.\n\nFull response:\n{text}"
         )
