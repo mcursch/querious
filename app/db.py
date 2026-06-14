@@ -69,6 +69,10 @@ def execute_query(sql: str, timeout_seconds: int = 5) -> list[dict]:
     Raises ValueError for unsafe queries; raises sqlite3.Error on DB errors.
     """
     _validate_sql(sql)
+    # Strip a trailing semicolon before wrapping; otherwise _enforce_limit
+    # produces "SELECT * FROM (… ;) _q LIMIT 200", which is a syntax error.
+    # (Models habitually terminate SQL with ';'.)
+    sql = sql.strip().rstrip(";").strip()
     sql = _enforce_limit(sql)
 
     conn = open_ro_connection()

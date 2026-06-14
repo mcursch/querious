@@ -24,6 +24,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 
+# Load .env so the API-key check and child scripts see the keys without the
+# user having to manually export them first.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

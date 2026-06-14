@@ -16,6 +16,14 @@ import sqlite3
 import struct
 from pathlib import Path
 
+# Load .env so VOYAGE_API_KEY is available when run directly (mirrors app/main.py).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).parent.parent / ".env")
+except ImportError:
+    pass
+
 try:
     import numpy as np
 except ImportError:
@@ -34,7 +42,10 @@ DB_PATH     = ROOT / "data" / "embeddings.db"
 VOYAGE_MODEL = "voyage-3.5"
 MAX_CHARS   = 1800   # ~450 tokens @ ~4 chars/token
 OVERLAP_CHARS = 200  # ~50-token overlap
-BATCH_SIZE  = 128    # Voyage API batch limit
+# Small batch keeps each request under the Voyage free-tier 10K TPM ceiling
+# (16 chunks * ~450 tokens ≈ 7.2K). Override via VOYAGE_BATCH_SIZE if you have
+# a paid plan and want fewer, larger requests.
+BATCH_SIZE  = int(os.environ.get("VOYAGE_BATCH_SIZE", "16"))
 
 
 # ---------------------------------------------------------------------------
@@ -126,14 +137,43 @@ def chunk_markdown(text: str, source: str) -> list[dict]:
 # Embedding
 # ---------------------------------------------------------------------------
 
+def _embed_batch_with_retry(
+    batch: list[str], vo: "voyageai.Client", max_attempts: int = 6
+) -> list[list[float]]:
+    """Embed one batch, backing off on rate-limit errors (free tier = 3 RPM)."""
+    import time
+
+    import voyageai.error  # local import; voyageai already confirmed importable
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return vo.embed(batch, model=VOYAGE_MODEL, input_type="document").embeddings
+        except voyageai.error.RateLimitError:
+            if attempt == max_attempts:
+                raise
+            wait = 25 * attempt  # 25s, 50s, ... — clears the 3 RPM window
+            print(
+                f"    Rate limited (attempt {attempt}/{max_attempts}); "
+                f"waiting {wait}s...",
+                flush=True,
+            )
+            time.sleep(wait)
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
 def embed_texts(texts: list[str], vo: "voyageai.Client") -> list[list[float]]:
     """Embed a list of texts in batches, returning a list of float vectors."""
+    import time
+
     all_embeddings: list[list[float]] = []
-    for i in range(0, len(texts), BATCH_SIZE):
+    n_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
+    for bi, i in enumerate(range(0, len(texts), BATCH_SIZE)):
         batch = texts[i: i + BATCH_SIZE]
-        result = vo.embed(batch, model=VOYAGE_MODEL, input_type="document")
-        all_embeddings.extend(result.embeddings)
+        all_embeddings.extend(_embed_batch_with_retry(batch, vo))
         print(f"    Embedded {min(i + BATCH_SIZE, len(texts))}/{len(texts)} chunks...")
+        # Proactively space requests to respect the free-tier 3 RPM limit.
+        if bi + 1 < n_batches:
+            time.sleep(21)
     return all_embeddings
 
 

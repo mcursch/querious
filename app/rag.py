@@ -205,12 +205,27 @@ def search(query: str, top_k: int = 5) -> list[Chunk]:
 # ---------------------------------------------------------------------------
 
 def _embed_query(text: str) -> list[float]:
+    import time
+
     import voyageai  # type: ignore[import]
+    import voyageai.error  # type: ignore[import]
 
     api_key = os.environ.get("VOYAGE_API_KEY")
     client = voyageai.Client(api_key=api_key)
-    result = client.embed([text], model="voyage-3.5", input_type="query")
-    return result.embeddings[0]
+
+    # The Voyage free tier is limited to 3 RPM; a single query embed can be
+    # rate-limited under concurrent load. Retry with backoff so search_docs
+    # stays reliable instead of erroring out and dropping the RAG context.
+    max_attempts = 4
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = client.embed([text], model="voyage-3.5", input_type="query")
+            return result.embeddings[0]
+        except voyageai.error.RateLimitError:
+            if attempt == max_attempts:
+                raise
+            time.sleep(21 * attempt)  # clears the 3 RPM window
+    raise RuntimeError("unreachable")  # pragma: no cover
 
 
 def _blob_to_vec(blob: bytes) -> list[float]:
