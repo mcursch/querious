@@ -104,11 +104,22 @@ async def run_chat(
         # ------------------------------------------------------------------ #
         async with client.messages.stream(
             model=MODEL,
-            system=SYSTEM_PROMPT,
+            # Cache the stable prefix (tools render before system, so a breakpoint
+            # on the system block caches tools + system together). Top-level
+            # cache_control auto-caches the last message block too, so each turn's
+            # growing history prefix is reused on the next turn.
+            system=[
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             messages=history,
             tools=TOOL_DEFINITIONS,
             max_tokens=MAX_TOKENS,
             thinking={"type": "adaptive"},
+            cache_control={"type": "ephemeral"},
         ) as stream:
             async for chunk in stream.text_stream:
                 if chunk:
