@@ -268,6 +268,25 @@
       font-size: 0.95rem;
     }
     #empty-state h2 { font-size: 1.4rem; margin-bottom: 6px; color: #555; }
+    #examples {
+      margin-top: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: 460px;
+    }
+    .example-chip {
+      background: #fff;
+      border: 1px solid #d0b8ff;
+      color: #5a2d82;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.88rem;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .example-chip:hover { background: #f8f4ff; border-color: #b388ff; }
   </style>
 </head>
 <body>
@@ -290,7 +309,14 @@
 <div id="chat-container">
   <div id="empty-state">
     <h2>How can I help?</h2>
-    <p>Ask about policies, products, customers, orders, invoices &amp; more.</p>
+    <p>Ask about policies, products, customers, orders, invoices &amp; more — try one:</p>
+    <div id="examples">
+      <button class="example-chip">What's our return policy on used tents?</button>
+      <button class="example-chip">How many customers do we have in California?</button>
+      <button class="example-chip">Show me a bar chart of products in each category</button>
+      <button class="example-chip">List overdue invoices over $500 with the customer name and state</button>
+      <button class="example-chip">Do premium customers get faster support per our SLA, and how many open tickets are there?</button>
+    </div>
   </div>
 </div>
 
@@ -707,6 +733,15 @@
     if (schemaPanel.classList.contains('open')) loadSchema();
   });
   schemaClose.addEventListener('click', () => schemaPanel.classList.remove('open'));
+
+  // Example-question chips: clicking one fills the input and sends it.
+  document.querySelectorAll('.example-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      if (isStreaming) return;
+      messageInput.value = chip.textContent;
+      sendMessage();
+    });
+  });
 
   sendBtn.addEventListener('click', sendMessage);
 
