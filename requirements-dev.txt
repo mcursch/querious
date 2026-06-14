@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Test stack
+pytest
+pytest-asyncio
+httpx          # FastAPI TestClient / async client for endpoint tests

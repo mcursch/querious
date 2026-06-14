@@ -99,7 +99,7 @@ async def run_chat(
             messages=history,
             tools=TOOL_DEFINITIONS,
             max_tokens=MAX_TOKENS,
-            thinking={"type": "enabled", "budget_tokens": 8000},
+            thinking={"type": "adaptive"},
         ) as stream:
             async for chunk in stream.text_stream:
                 if chunk:

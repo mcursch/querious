@@ -35,6 +35,7 @@ variables ANTHROPIC_API_KEY / VOYAGE_API_KEY must be set (or loaded from
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from typing import List, Tuple
@@ -43,6 +44,14 @@ import pytest
 from starlette.testclient import TestClient
 
 from app.main import app  # available only in a fully set-up environment
+
+# These are live acceptance tests: they drive the real Claude API end to end.
+# Skip (rather than fail) when no API key is available so the offline unit
+# suite stays green — mirrors the guard in test_acceptance_docs.py.
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY"),
+    reason="ANTHROPIC_API_KEY is not set; live SQL acceptance tests are skipped",
+)
 
 # ---------------------------------------------------------------------------
 # Constants
