@@ -27,6 +27,61 @@
     }
     header h1 { font-size: 1.25rem; font-weight: 600; }
     header span { opacity: 0.7; font-size: 0.85rem; }
+    #schema-btn {
+      margin-left: auto;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    #schema-btn:hover { background: rgba(255,255,255,0.22); }
+
+    /* Schema sidebar */
+    #schema-panel {
+      position: fixed;
+      top: 0; right: 0;
+      height: 100vh;
+      width: 340px;
+      max-width: 90vw;
+      background: #fff;
+      border-left: 1px solid #ddd;
+      box-shadow: -2px 0 12px rgba(0,0,0,0.12);
+      transform: translateX(100%);
+      transition: transform 0.2s ease;
+      overflow-y: auto;
+      z-index: 50;
+      padding: 16px 18px;
+    }
+    #schema-panel.open { transform: translateX(0); }
+    .schema-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .schema-head strong { font-size: 1.05rem; color: #1a1a2e; }
+    #schema-close {
+      background: none; border: none; font-size: 1.4rem; line-height: 1;
+      cursor: pointer; color: #888;
+    }
+    .schema-hint { font-size: 0.8rem; color: #777; margin-bottom: 12px; }
+    .schema-table { margin-bottom: 8px; border: 1px solid #e6e0f0; border-radius: 8px; }
+    .schema-table > summary {
+      list-style: none; cursor: pointer; padding: 8px 10px;
+      display: flex; align-items: baseline; gap: 8px;
+      font-weight: 600; color: #5a2d82; user-select: none;
+    }
+    .schema-table > summary::-webkit-details-marker { display: none; }
+    .schema-table > summary .rows { margin-left: auto; font-weight: 400; font-size: 0.78rem; color: #999; }
+    .schema-cols { padding: 4px 10px 10px; }
+    .schema-col {
+      display: flex; justify-content: space-between;
+      font-size: 0.82rem; padding: 2px 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .schema-col .col-name { color: #1a1a2e; }
+    .schema-col .col-type { color: #999; }
 
     #chat-container {
       flex: 1;
@@ -194,7 +249,17 @@
 <header>
   <h1>&#129302; Querious</h1>
   <span>Acme Outfitters internal AI assistant</span>
+  <button id="schema-btn" title="Show database schema">&#128202; Schema</button>
 </header>
+
+<aside id="schema-panel">
+  <div class="schema-head">
+    <strong>Database schema</strong>
+    <button id="schema-close" title="Close">&times;</button>
+  </div>
+  <p class="schema-hint">Tables Querious can query on the fly — no endpoint needed.</p>
+  <div id="schema-content">Loading…</div>
+</aside>
 
 <div id="chat-container">
   <div id="empty-state">
@@ -450,6 +515,42 @@
   // ---------------------------------------------------------------------------
   // Event listeners
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // Schema sidebar
+  // ---------------------------------------------------------------------------
+  const schemaBtn   = document.getElementById('schema-btn');
+  const schemaPanel = document.getElementById('schema-panel');
+  const schemaClose = document.getElementById('schema-close');
+  const schemaContent = document.getElementById('schema-content');
+  let schemaLoaded = false;
+
+  async function loadSchema() {
+    if (schemaLoaded) return;
+    try {
+      const resp = await fetch('/schema');
+      const data = await resp.json();
+      if (!data.tables) throw new Error(data.error || 'no schema');
+      schemaContent.innerHTML = data.tables.map(t => `
+        <details class="schema-table">
+          <summary>${escHtml(t.table)}<span class="rows">${t.row_count.toLocaleString()} rows</span></summary>
+          <div class="schema-cols">
+            ${t.columns.map(c =>
+              `<div class="schema-col"><span class="col-name">${escHtml(c.name)}</span>` +
+              `<span class="col-type">${escHtml(c.type)}</span></div>`).join('')}
+          </div>
+        </details>`).join('');
+      schemaLoaded = true;
+    } catch (err) {
+      schemaContent.textContent = 'Failed to load schema: ' + err.message;
+    }
+  }
+
+  schemaBtn.addEventListener('click', () => {
+    schemaPanel.classList.toggle('open');
+    if (schemaPanel.classList.contains('open')) loadSchema();
+  });
+  schemaClose.addEventListener('click', () => schemaPanel.classList.remove('open'));
 
   sendBtn.addEventListener('click', sendMessage);
 

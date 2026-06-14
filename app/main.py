@@ -87,6 +87,17 @@ async def health() -> JSONResponse:
     return JSONResponse(content=payload, status_code=status_code)
 
 
+@app.get("/schema")
+async def schema() -> JSONResponse:
+    """Return the database schema (tables, columns, row counts) for the UI sidebar."""
+    from app import db
+
+    try:
+        return JSONResponse(content={"tables": db.get_schema_structured()})
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(content={"error": str(exc)}, status_code=503)
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str

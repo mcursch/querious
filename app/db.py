@@ -62,6 +62,37 @@ def get_schema() -> str:
         conn.close()
 
 
+def get_schema_structured() -> list[dict]:
+    """Return the schema as structured data for the UI sidebar.
+
+    [{"table": str, "row_count": int, "columns": [{"name": str, "type": str}]}]
+    """
+    conn = open_ro_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+            "ORDER BY name"
+        )
+        tables = [row["name"] for row in cur.fetchall()]
+
+        result: list[dict] = []
+        for name in tables:
+            cur.execute(f"PRAGMA table_info([{name}])")
+            columns = [
+                {"name": r["name"], "type": r["type"] or ""} for r in cur.fetchall()
+            ]
+            cur.execute(f"SELECT COUNT(*) FROM [{name}]")  # noqa: S608
+            row_count = cur.fetchone()[0]
+            result.append(
+                {"table": name, "row_count": row_count, "columns": columns}
+            )
+        return result
+    finally:
+        conn.close()
+
+
 def execute_query(sql: str, timeout_seconds: int = 5) -> list[dict]:
     """
     Execute a read-only SELECT and return rows as a list of dicts (≤ 200 rows).
