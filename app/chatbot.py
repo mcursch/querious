@@ -57,6 +57,15 @@ Guidelines:
 Do not give up after a single failure.
 - You may call multiple tools in a single turn and combine results.
 - Be concise but complete; use markdown formatting for tables and code blocks.
+- When a question is naturally visual (trends over time, comparisons across \
+categories, distributions, rankings), you MAY include ONE chart in addition to \
+your written answer. Emit it as a fenced ```chart code block containing a single \
+JSON object:
+      {"type": "bar" | "line", "title": "...", "x": ["label", ...],
+       "series": [{"name": "...", "values": [number, ...]}]}
+  Requirements: valid JSON; "x" and every series' "values" must be the same \
+length; numbers only in "values". The chart supplements your text — still give \
+the normal answer and any table.
 - Never fabricate data. If you don't know, say so and suggest how to find out."""
 
 

@@ -247,6 +247,20 @@
     }
     .bubble th { background: #f5f5f5; }
 
+    /* Inline charts (rendered from ```chart specs) */
+    .chart-wrap {
+      margin: 8px 0;
+      background: #fff;
+      border: 1px solid #e6e0f0;
+      border-radius: 8px;
+      padding: 6px;
+      max-width: 460px;
+    }
+    .chart { width: 100%; height: auto; display: block; }
+    .chart-title { font-size: 12px; font-weight: 600; fill: #1a1a2e; }
+    .chart-axis { stroke: #ccc; stroke-width: 1; }
+    .chart-tick { font-size: 9px; fill: #777; }
+
     #empty-state {
       margin: auto;
       text-align: center;
@@ -329,9 +343,14 @@
    * tables). Enough for the chatbot's typical output; no external lib needed.
    */
   function markdownToHtml(text) {
-    // Fenced code blocks
-    text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
-      `<pre><code>${escHtml(code.trimEnd())}</code></pre>`);
+    // Fenced code blocks — render ```chart specs as inline SVG, others as code
+    text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+      if (lang === 'chart') {
+        const svg = renderChart(code);
+        if (svg) return svg;          // fall through to code block if invalid
+      }
+      return `<pre><code>${escHtml(code.trimEnd())}</code></pre>`;
+    });
     // Inline code
     text = text.replace(/`([^`]+)`/g, (_, c) => `<code>${escHtml(c)}</code>`);
     // Bold
@@ -356,6 +375,96 @@
   function escHtml(s) {
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')
             .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  const CHART_COLORS = ['#5a2d82', '#2d82a8', '#a8632d', '#2da86b', '#a82d5a'];
+
+  function fmtNum(n) {
+    const a = Math.abs(n);
+    if (a >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (a >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return Number.isInteger(n) ? String(n) : n.toFixed(2);
+  }
+
+  /** Render a ```chart JSON spec to an inline SVG. Returns null if invalid. */
+  function renderChart(jsonStr) {
+    let spec;
+    try { spec = JSON.parse(jsonStr); } catch { return null; }
+    if (!spec || (spec.type !== 'bar' && spec.type !== 'line')) return null;
+    const x = spec.x, series = spec.series;
+    if (!Array.isArray(x) || !Array.isArray(series) || !series.length) return null;
+    for (const s of series) {
+      if (!Array.isArray(s.values) || s.values.length !== x.length) return null;
+    }
+    const nums = series.flatMap(s => s.values.map(Number));
+    if (nums.some(v => !Number.isFinite(v))) return null;
+
+    const W = 440, H = 260, padL = 46, padR = 14, padT = 30, padB = 52;
+    const pw = W - padL - padR, ph = H - padT - padB;
+    const maxV = Math.max(0, ...nums) || 1;
+    const yOf = v => padT + ph * (1 - v / maxV);
+    const n = x.length;
+    const slot = pw / n;
+    const rotate = n > 6;
+
+    let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img">`;
+    if (spec.title) {
+      svg += `<text x="${W/2}" y="18" text-anchor="middle" class="chart-title">${escHtml(String(spec.title))}</text>`;
+    }
+    // axes + baseline gridlines (0 and max)
+    svg += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT+ph}" class="chart-axis"/>`;
+    svg += `<line x1="${padL}" y1="${padT+ph}" x2="${padL+pw}" y2="${padT+ph}" class="chart-axis"/>`;
+    svg += `<text x="${padL-6}" y="${padT+ph+4}" text-anchor="end" class="chart-tick">0</text>`;
+    svg += `<text x="${padL-6}" y="${padT+8}" text-anchor="end" class="chart-tick">${fmtNum(maxV)}</text>`;
+
+    if (spec.type === 'bar') {
+      const S = series.length;
+      const inner = slot * 0.7, bw = inner / S;
+      series.forEach((s, si) => {
+        s.values.forEach((vRaw, i) => {
+          const v = Number(vRaw);
+          const bx = padL + slot * i + (slot - inner) / 2 + bw * si;
+          const by = yOf(v), bh = (padT + ph) - by;
+          svg += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, bh).toFixed(1)}" fill="${CHART_COLORS[si % CHART_COLORS.length]}"><title>${escHtml(String(s.name||''))} ${escHtml(String(x[i]))}: ${fmtNum(v)}</title></rect>`;
+        });
+      });
+    } else { // line
+      series.forEach((s, si) => {
+        const pts = s.values.map((vRaw, i) =>
+          `${(padL + slot*i + slot/2).toFixed(1)},${yOf(Number(vRaw)).toFixed(1)}`).join(' ');
+        svg += `<polyline points="${pts}" fill="none" stroke="${CHART_COLORS[si % CHART_COLORS.length]}" stroke-width="2"/>`;
+        s.values.forEach((vRaw, i) => {
+          const cx = padL + slot*i + slot/2, cy = yOf(Number(vRaw));
+          svg += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2.5" fill="${CHART_COLORS[si % CHART_COLORS.length]}"><title>${escHtml(String(s.name||''))} ${escHtml(String(x[i]))}: ${fmtNum(Number(vRaw))}</title></circle>`;
+        });
+      });
+    }
+
+    // x labels
+    x.forEach((lab, i) => {
+      const cx = padL + slot * i + slot / 2;
+      let t = String(lab);
+      if (t.length > 12) t = t.slice(0, 11) + '…';
+      const ty = padT + ph + 14;
+      const tr = rotate ? ` transform="rotate(-35 ${cx} ${ty})"` : '';
+      const anchor = rotate ? 'end' : 'middle';
+      svg += `<text x="${cx.toFixed(1)}" y="${ty}" text-anchor="${anchor}" class="chart-tick"${tr}>${escHtml(t)}</text>`;
+    });
+
+    // legend (multi-series)
+    if (series.length > 1) {
+      let lx = padL;
+      series.forEach((s, si) => {
+        svg += `<rect x="${lx}" y="${H-12}" width="9" height="9" fill="${CHART_COLORS[si % CHART_COLORS.length]}"/>`;
+        const name = String(s.name || `series ${si+1}`);
+        svg += `<text x="${lx+13}" y="${H-4}" class="chart-tick">${escHtml(name)}</text>`;
+        lx += 13 + name.length * 6 + 14;
+      });
+    }
+
+    svg += `</svg>`;
+    return `<div class="chart-wrap">${svg}</div>`;
   }
 
   // ---------------------------------------------------------------------------
