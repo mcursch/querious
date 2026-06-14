@@ -154,6 +154,18 @@
       white-space: pre-wrap;
     }
 
+    .csv-btn {
+      margin-top: 8px;
+      background: #5a2d82;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .csv-btn:hover { background: #471f68; }
+
     .spinner { animation: spin 1s linear infinite; display: inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -414,11 +426,13 @@
     return '';
   }
 
-  function finaliseToolChip(name, summary) {
-    // Find the most recent chip for this tool
+  function finaliseToolChip(name, summary, data) {
+    // Find the most recent unfinalised chip for this tool
     const chips = [...chatContainer.querySelectorAll('.tool-chip')];
-    const chip = chips.reverse().find(c => c.dataset.toolName === name);
+    const chip = chips.reverse().find(
+      c => c.dataset.toolName === name && !c.dataset.done);
     if (!chip) return;
+    chip.dataset.done = '1';
     const statusEl = chip.querySelector('.status');
     if (statusEl) {
       statusEl.classList.remove('spinner');
@@ -431,6 +445,39 @@
         : name === 'run_sql'   ? 'Ran SQL'
         : 'Got schema';
     }
+    // Offer a CSV download for non-empty SQL results
+    if (name === 'run_sql' && data && Array.isArray(data.rows) && data.rows.length) {
+      const detail = chip.querySelector('.detail');
+      if (detail && !detail.querySelector('.csv-btn')) {
+        const btn = document.createElement('button');
+        btn.className = 'csv-btn';
+        btn.textContent = `⬇ Download ${data.rows.length} rows (CSV)`;
+        btn.addEventListener('click', e => {
+          e.preventDefault();
+          downloadCsv(data.rows);
+        });
+        detail.appendChild(btn);
+      }
+    }
+  }
+
+  function downloadCsv(rows) {
+    const cols = Object.keys(rows[0]);
+    const esc = v => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const csv = [cols.join(',')]
+      .concat(rows.map(r => cols.map(c => esc(r[c])).join(',')))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'querious_results.csv';
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // ---------------------------------------------------------------------------
@@ -501,7 +548,7 @@
     } else if (type === 'tool_start') {
       addToolChip(data.name, data.input || {});
     } else if (type === 'tool_end') {
-      finaliseToolChip(data.name, data.summary || 'done');
+      finaliseToolChip(data.name, data.summary || 'done', data);
       // Next text goes into a fresh bubble after the chip
       currentAssistantBubble = null;
     } else if (type === 'done') {

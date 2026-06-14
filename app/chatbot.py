@@ -159,6 +159,14 @@ async def run_chat(
                 end_event["sources"] = [
                     c["source"] for c in result["chunks"] if "source" in c
                 ]
+            # Expose SQL result rows so the UI can offer a CSV download.
+            if (
+                block.name == "run_sql"
+                and isinstance(result, dict)
+                and "rows" in result
+            ):
+                end_event["rows"] = result["rows"]
+                end_event["query"] = tool_input.get("query", "")
             yield end_event
 
             tool_results.append(

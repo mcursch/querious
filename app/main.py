@@ -130,10 +130,12 @@ async def chat(request: ChatRequest) -> EventSourceResponse:
                         "data": json.dumps({"name": event["name"], "input": event["input"]}),
                     }
                 elif event_type == "tool_end":
-                    yield {
-                        "event": "tool_end",
-                        "data": json.dumps({"name": event["name"], "summary": event["summary"]}),
-                    }
+                    end_payload = {"name": event["name"], "summary": event["summary"]}
+                    if "rows" in event:
+                        end_payload["rows"] = event["rows"]
+                    if "query" in event:
+                        end_payload["query"] = event["query"]
+                    yield {"event": "tool_end", "data": json.dumps(end_payload)}
                 elif event_type == "done":
                     yield {"event": "done", "data": "{}"}
         except Exception as exc:  # noqa: BLE001
