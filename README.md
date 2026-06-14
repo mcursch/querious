@@ -48,7 +48,7 @@ Open http://localhost:8000 and ask away. (No `make`? See [run.sh](run.sh) / the 
 |---|---|
 | `make install` | Create `.venv` and install dependencies |
 | `make setup` | Build the databases (seed + embed) |
-| `make run` | Start the server on `0.0.0.0:8000` (override `HOST`/`PORT`) |
+| `make run` | Start the server on the first free port at/after `8000` (override `HOST`/`PORT`) |
 | `make dev` | Start with auto-reload |
 | `make test` | Run the test suite |
 | `make stop` | Stop a running server |

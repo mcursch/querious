@@ -20,7 +20,7 @@ install: ## Create the virtualenv and install dependencies
 setup: ## Build the databases (seed acme.db + embed docs via Voyage)
 	$(PYTHON) setup.py
 
-run: ## Start the server (foreground) on 0.0.0.0:8000 (override HOST/PORT)
+run: ## Start the server on the first free port at/after 8000 (override HOST/PORT)
 	HOST=$(HOST) PORT=$(PORT) ./run.sh
 
 dev: ## Start the server with auto-reload
