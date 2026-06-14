@@ -13,6 +13,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# Load .env so live acceptance tests (which need ANTHROPIC_API_KEY / VOYAGE_API_KEY)
+# can see the keys at collection time. No-op if python-dotenv or .env is absent.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 
 # ---------------------------------------------------------------------------
 # SSE helpers

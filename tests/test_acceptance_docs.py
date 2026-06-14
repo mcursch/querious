@@ -20,8 +20,9 @@ import pytest
 # Skip conditions
 # ---------------------------------------------------------------------------
 
-_ACME_DB = Path("data/acme.db")
-_EMBED_DB = Path("data/embeddings.db")
+_DATA_DIR = Path(__file__).parent.parent / "data"
+_ACME_DB = _DATA_DIR / "acme.db"
+_EMBED_DB = _DATA_DIR / "embeddings.db"
 
 _DATABASES_MISSING = not _ACME_DB.exists() or not _EMBED_DB.exists()
 _SKIP_REASON = (
@@ -48,6 +49,26 @@ from app.chatbot import ChatSession, TurnResult  # noqa: E402  (import after ski
 # ---------------------------------------------------------------------------
 # Shared session fixture
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module", autouse=True)
+def _use_real_data():
+    """Point the app at the real seeded data dir for the whole module.
+
+    conftest.py installs a session-scoped fixture that redirects
+    QUERIOUS_DATA_DIR to a tiny hermetic database for unit-test isolation.
+    These acceptance tests need production-scale data (the full seed + the
+    populated embeddings index), so we override the env var here and restore
+    it afterwards.  Module-scoped so it runs before any module-scoped result
+    fixture performs a live chat.
+    """
+    prev = os.environ.get("QUERIOUS_DATA_DIR")
+    os.environ["QUERIOUS_DATA_DIR"] = str(_DATA_DIR)
+    yield
+    if prev is None:
+        os.environ.pop("QUERIOUS_DATA_DIR", None)
+    else:
+        os.environ["QUERIOUS_DATA_DIR"] = prev
+
 
 @pytest.fixture(scope="module")
 def session() -> "ChatSession":

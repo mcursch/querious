@@ -38,6 +38,7 @@ import json
 import os
 import re
 import uuid
+from pathlib import Path
 from typing import List, Tuple
 
 import pytest
@@ -45,13 +46,43 @@ from starlette.testclient import TestClient
 
 from app.main import app  # available only in a fully set-up environment
 
-# These are live acceptance tests: they drive the real Claude API end to end.
-# Skip (rather than fail) when no API key is available so the offline unit
-# suite stays green — mirrors the guard in test_acceptance_docs.py.
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY is not set; live SQL acceptance tests are skipped",
-)
+# These are live acceptance tests: they drive the real Claude API end to end
+# against the real seeded database. Skip (rather than fail) when the API key or
+# the seeded data files are missing, so the offline unit suite stays green —
+# mirrors the guards in test_acceptance_docs.py.
+_DATA_DIR = Path(__file__).parent.parent / "data"
+_ACME_DB = _DATA_DIR / "acme.db"
+_EMBED_DB = _DATA_DIR / "embeddings.db"
+
+pytestmark = [
+    pytest.mark.skipif(
+        not os.environ.get("ANTHROPIC_API_KEY"),
+        reason="ANTHROPIC_API_KEY is not set; live SQL acceptance tests are skipped",
+    ),
+    pytest.mark.skipif(
+        not _ACME_DB.exists() or not _EMBED_DB.exists(),
+        reason="Seeded data (data/acme.db, data/embeddings.db) not found; "
+        "run `python setup.py` first",
+    ),
+]
+
+
+# Module-scoped (not function-scoped) so it sets the env var BEFORE the
+# module-scoped result fixtures (q2_result, etc.) run the chat. A function
+# fixture would run too late — the chat would already have hit the hermetic DB.
+@pytest.fixture(scope="module", autouse=True)
+def _use_real_data():
+    """Point the app at the real seeded data dir, overriding the hermetic
+    session-scoped fixture in conftest.py. These acceptance tests assert
+    real, seed-derived results, so they need the full seeded database, not the
+    tiny isolation DB."""
+    prev = os.environ.get("QUERIOUS_DATA_DIR")
+    os.environ["QUERIOUS_DATA_DIR"] = str(_DATA_DIR)
+    yield
+    if prev is None:
+        os.environ.pop("QUERIOUS_DATA_DIR", None)
+    else:
+        os.environ["QUERIOUS_DATA_DIR"] = prev
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -231,18 +262,24 @@ class TestQ2CaliforniaCustomerCount:
             f"{[e for e in events if e.get('type') == 'tool_start']!r}"
         )
 
-    def test_answer_contains_plausible_ca_count(self, q2_result):
+    def test_answer_contains_true_ca_count(self, q2_result):
         """
-        With ~300 total customers distributed across all 50 US states, a
-        plausible California share is roughly 20–60 rows.  The seeder uses
-        ``Faker.seed(42)`` so the value is deterministic; the range avoids
-        brittleness if neighbouring tasks adjust seeder row counts slightly.
+        The answer must contain the *actual* California customer count from the
+        same seeded database the chatbot queried.  We compute ground truth here
+        rather than hardcoding a range, so the test is robust to the seed's
+        real state distribution (≈ total/50 per state, not CA-heavy).
         """
+        from app import db
+
+        true_count = db.execute_query(
+            "SELECT COUNT(*) AS n FROM customers WHERE state = 'CA'"
+        )[0]["n"]
+
         _, text = q2_result
         numbers = [int(m) for m in re.findall(r"\b(\d+)\b", text)]
-        assert any(20 <= n <= 60 for n in numbers), (
-            "Expected a number between 20 and 60 (plausible CA customer count) "
-            f"in the answer; extracted numbers: {numbers!r}\n\nFull response:\n{text}"
+        assert true_count in numbers, (
+            f"Expected the true CA customer count ({true_count}) to appear in "
+            f"the answer; extracted numbers: {numbers!r}\n\nFull response:\n{text}"
         )
 
 
